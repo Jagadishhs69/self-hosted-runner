@@ -1,0 +1,63 @@
+name: CI/CD Pipeline for Node.js App
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test || true # Replace with actual test command
+
+      - name: Login to Docker Hub
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+
+      - name: Build Docker image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/node-app:latest .
+
+      - name: Push Docker image
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/node-app:latest
+
+  deploy:
+    needs: build
+    runs-on: 
+      - self-hosted
+      - label-1
+      - label-2
+    steps:
+      - name: Pull Docker image
+        run: docker pull ${{ secrets.DOCKER_USERNAME }}/node-app:latest
+
+      - name: Stop and remove old container
+        run: |
+          docker stop node-app-container || true
+          docker rm node-app-container || true
+
+      - name: Run new container
+        run: |
+          docker run -d -p 80:3000 --name node-app-container \
+          --log-driver=awslogs \
+          --log-opt awslogs-region=ap-south-1 \
+          --log-opt awslogs-group=/ec2/node-app \
+          --log-opt awslogs-stream=node-app-container \
+          ${{ secrets.DOCKER_USERNAME }}/node-app:latest
